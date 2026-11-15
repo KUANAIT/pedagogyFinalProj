@@ -1,1 +1,8 @@
-{}
+{
+  "title": "Adaptive Learning Assistant",
+  "description": "Adaptive Learning Assistant — University LMS Demo",
+  "icons": {
+    "icon": "favicon.svg"
+  }
+}
+
