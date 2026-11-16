@@ -2158,3 +2158,13 @@ td:first-child {
     align-items: flex-start;
   }
 }
+.mapping-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.mapping-table .tag-chip {
+  font-size: 12px;
+  padding: 3px 10px;
+}

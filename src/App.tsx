@@ -1573,24 +1573,53 @@ function App() {
                 </div>
               )}
             </section>
-            <section className="panel mapping-summary">
-              <div>
-                <strong>{c.mapping}</strong>
-                <p>
-                  {questions.length} questions mapped to {new Set(conceptMapping).size} concepts. The
-                  assistant suggested each concept, you confirmed it. Correct a concept in Question bank:
-                  results update immediately.
-                </p>
+            <section className="table-section">
+              <div className="section-heading">
+                <div>
+                  <h2>{c.mapping}</h2>
+                  <p>
+                    Concepts were suggested by the assistant when the check-in was built and confirmed by
+                    you. To correct one, open Question bank: results update immediately.
+                  </p>
+                </div>
+                <div className="mapping-head-actions">
+                  <span>{questions.length} questions · published</span>
+                  <button
+                    className="btn secondary small"
+                    onClick={() => {
+                      setBankStartWeek(6);
+                      setTeacherTab("bank");
+                    }}
+                  >
+                    Edit in Question bank
+                  </button>
+                </div>
               </div>
-              <button
-                className="btn secondary"
-                onClick={() => {
-                  setBankStartWeek(6);
-                  setTeacherTab("bank");
-                }}
-              >
-                Review in Question bank
-              </button>
+              <div className="table-wrap mapping-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{c.question}</th>
+                      <th>{c.detectedConcept}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {questions.map((question, index) => (
+                      <tr key={question.text}>
+                        <td>
+                          <strong>
+                            {c.question} {index + 1}
+                          </strong>
+                          <small>{question.text}</small>
+                        </td>
+                        <td>
+                          <span className="tag-chip">{conceptLabel(conceptMapping[index])}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
             <section className="table-section drafted-section">
               <div className="section-heading">
