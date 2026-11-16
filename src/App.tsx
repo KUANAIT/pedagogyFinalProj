@@ -97,6 +97,7 @@ function App() {
   );
   const [onlySupport, setOnlySupport] = useState(false);
   const [bank, setBank] = useState<BankQuestion[]>(() => loadSaved("bank-v2", initialBank));
+  const [bankStartWeek, setBankStartWeek] = useState<6 | 7>(7);
   const [customConcepts, setCustomConcepts] = useState<string[]>(() => loadSaved("concepts", []));
   const allConcepts = [...concepts, ...customConcepts];
   const addConcept = (name: string) =>
@@ -1466,7 +1467,10 @@ function App() {
             <button
               key={key}
               className={teacherTab === key ? "active" : ""}
-              onClick={() => setTeacherTab(key)}
+              onClick={() => {
+                if (key === "bank") setBankStartWeek(7);
+                setTeacherTab(key);
+              }}
             >
               {label}
             </button>
@@ -1475,6 +1479,8 @@ function App() {
         {teacherTab === "class" && ClassView()}
         {teacherTab === "bank" && (
           <QuestionBank
+            key={bankStartWeek}
+            startWeek={bankStartWeek}
             bank={bank}
             setBank={setBank}
             week6={questions}
@@ -1567,52 +1573,24 @@ function App() {
                 </div>
               )}
             </section>
-            <section className="table-section">
-              <div className="section-heading">
-                <div>
-                  <h2>{c.mapping}</h2>
-                  <p>{c.mappingNote}</p>
-                </div>
-                <span>{questions.length} questions · published</span>
+            <section className="panel mapping-summary">
+              <div>
+                <strong>{c.mapping}</strong>
+                <p>
+                  {questions.length} questions mapped to {new Set(conceptMapping).size} concepts. The
+                  assistant suggested each concept, you confirmed it. Correct a concept in Question bank:
+                  results update immediately.
+                </p>
               </div>
-              <div className="table-wrap mapping-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{c.question}</th>
-                      <th>{c.detectedConcept}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {questions.map((question, index) => (
-                      <tr key={question.text}>
-                        <td>
-                          <strong>
-                            {c.question} {index + 1}
-                          </strong>
-                          <small>{question.text}</small>
-                        </td>
-                        <td>
-                          <ConceptPicker
-                            value={conceptMapping[index]}
-                            options={allConcepts}
-                            label={conceptLabel}
-                            onChange={(value) =>
-                              setConceptMapping((current) =>
-                                current.map((concept, conceptIndex) =>
-                                  conceptIndex === index ? value : concept,
-                                ),
-                              )
-                            }
-                            onCreate={addConcept}
-                            ariaLabel={`${c.detectedConcept} ${index + 1}`}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <button
+                className="btn secondary"
+                onClick={() => {
+                  setBankStartWeek(6);
+                  setTeacherTab("bank");
+                }}
+              >
+                Review in Question bank
+              </button>
             </section>
             <section className="table-section drafted-section">
               <div className="section-heading">
