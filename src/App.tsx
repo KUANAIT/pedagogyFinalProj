@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Language = "EN" | "RU" | "KZ";
 type Concept =
@@ -132,6 +132,10 @@ const copy = {
     confHigh: "High",
     score: "{correct} of {total} correct",
     examToggle: "Exam-style tasks",
+    examBadge: "Exam-style · 3-minute limit · 1 hint",
+    stepBadge: "Step-by-step · all 3 hints available",
+    examLocked: "Not available in exam-style mode",
+    timeUp: "Time is up. Check your answer.",
     requestSent: "Request sent to your teacher (simulated).",
     officeSent: "Office hours request sent (simulated).",
     notInDemo: "This section is not part of the demo. Use the Assistant.",
@@ -260,6 +264,10 @@ const copy = {
     confHigh: "Высокая",
     score: "Верно: {correct} из {total}",
     examToggle: "Задания в формате экзамена",
+    examBadge: "Формат экзамена · 3 минуты · 1 подсказка",
+    stepBadge: "Пошагово · доступны все 3 подсказки",
+    examLocked: "Недоступно в формате экзамена",
+    timeUp: "Время вышло. Проверьте ответ.",
     requestSent: "Запрос отправлен преподавателю (симуляция).",
     officeSent: "Запрос на консультацию отправлен (симуляция).",
     notInDemo: "Этот раздел не входит в демо. Используйте Ассистента.",
@@ -387,6 +395,10 @@ const copy = {
     confHigh: "Жоғары",
     score: "Дұрыс: {total} сұрақтың {correct}",
     examToggle: "Емтихан форматындағы тапсырмалар",
+    examBadge: "Емтихан форматы · 3 минут · 1 кеңес",
+    stepBadge: "Қадамдық · барлық 3 кеңес қолжетімді",
+    examLocked: "Емтихан форматында қолжетімсіз",
+    timeUp: "Уақыт бітті. Жауапты тексеріңіз.",
     requestSent: "Сұрау оқытушыға жіберілді (симуляция).",
     officeSent: "Кеңеске жазылу сұрауы жіберілді (симуляция).",
     notInDemo: "Бұл бөлім демоға кірмейді. Көмекшіні пайдаланыңыз.",
@@ -568,6 +580,97 @@ const initialItems = [
   { id: 3, item: "Calculate a simple event", topic: "Probability", status: "draft" },
 ];
 
+const classNames = [
+  "Aigerim B.", "Daniyar K.", "Madina T.", "Nursultan A.", "Dana M.", "Alikhan S.", "Kamila Zh.",
+  "Yerlan O.", "Aruzhan K.", "Timur B.", "Saule N.", "Arman D.", "Zarina E.", "Bekzat R.",
+  "Ainur S.", "Miras T.", "Togzhan A.", "Ilyas M.", "Asel K.", "Dias Zh.", "Malika O.",
+  "Sanzhar B.", "Aliya N.", "Rustem K.", "Inkar T.", "Adil S.", "Gulnaz A.", "Erasyl M.", "Laura D.",
+];
+
+const statusWeights: Record<Concept, [number, number, number, number]> = {
+  // Mastered, Fragile, Gap, Misconception
+  "Probability basics": [0.86, 0.1, 0.03, 0.01],
+  "Conditional probability": [0.72, 0.14, 0.09, 0.05],
+  "Hypothesis testing": [0.68, 0.14, 0.1, 0.08],
+  "p-values interpretation": [0.5, 0.16, 0.08, 0.26],
+};
+
+function seeded(seed: number) {
+  let value = seed;
+  return () => {
+    value = (value * 9301 + 49297) % 233280;
+    return value / 233280;
+  };
+}
+
+const simulatedClass: { name: string; statuses: Record<Concept, Classification>; score: number }[] =
+  (() => {
+    const random = seeded(42);
+    const order: Classification[] = ["Mastered", "Fragile", "Gap", "Misconception"];
+    return classNames.map((name) => {
+      const statuses = {} as Record<Concept, Classification>;
+      let correct = 0;
+      (Object.keys(statusWeights) as Concept[]).forEach((concept) => {
+        const roll = random();
+        let acc = 0;
+        let pick: Classification = "Mastered";
+        statusWeights[concept].some((weight, index) => {
+          acc += weight;
+          if (roll < acc) {
+            pick = order[index];
+            return true;
+          }
+          return false;
+        });
+        statuses[concept] = pick;
+        if (pick === "Mastered" || pick === "Fragile") correct += 1.5;
+      });
+      return { name, statuses, score: Math.round((correct / 6) * 100) };
+    });
+  })();
+
+const historyWeeks: { week: number; date: string; score: string; statuses: Record<Concept, Classification> }[] = [
+  {
+    week: 4,
+    date: "26 Oct",
+    score: "3 of 6",
+    statuses: {
+      "Probability basics": "Gap",
+      "Conditional probability": "Gap",
+      "Hypothesis testing": "Gap",
+      "p-values interpretation": "Gap",
+    },
+  },
+  {
+    week: 5,
+    date: "2 Nov",
+    score: "4 of 6",
+    statuses: {
+      "Probability basics": "Mastered",
+      "Conditional probability": "Fragile",
+      "Hypothesis testing": "Gap",
+      "p-values interpretation": "Misconception",
+    },
+  },
+];
+
+function suggestConcept(text: string): { concept: Concept; confidence: number } {
+  const t = text.toLowerCase();
+  if (/p-?value|p =|p=|significan/.test(t)) return { concept: "p-values interpretation", confidence: 0.86 };
+  if (/given|conditional|\|/.test(t)) return { concept: "Conditional probability", confidence: 0.81 };
+  if (/hypothes|null|h0|reject|type i|type ii|test/.test(t)) return { concept: "Hypothesis testing", confidence: 0.78 };
+  return { concept: "Probability basics", confidence: 0.64 };
+}
+
+function loadSaved<T>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem("ala-demo-" + key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function Icon({
   name,
   size = 18,
@@ -665,8 +768,35 @@ function App() {
     questions.map((question) => question.concept),
   );
   const [navNote, setNavNote] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(180);
+  const examMode = learningGoal === "midterm";
+  useEffect(() => {
+    if (view !== "student" || screen !== "practice" || !examMode || feedback === "correct") return;
+    const timer = setInterval(() => setSecondsLeft((value) => (value > 0 ? value - 1 : 0)), 1000);
+    return () => clearInterval(timer);
+  }, [view, screen, examMode, feedback]);
   const [alertText, setAlertText] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<number | null>(null);
+  const [studentPage, setStudentPage] = useState<"assistant" | "progress" | "week5" | "week7" | "grades">("assistant");
+  const [teacherTab, setTeacherTab] = useState<"overview" | "class" | "bank">("overview");
+  const [onlySupport, setOnlySupport] = useState(false);
+  const [bank, setBank] = useState<{ id: number; text: string; concept: Concept; status: "approved" }[]>(() =>
+    loadSaved("bank", [
+      { id: 1, text: "A test gives p = 0.12 with α = 0.05. What do you conclude?", concept: "p-values interpretation" as Concept, status: "approved" as const },
+    ]),
+  );
+  const [draftText, setDraftText] = useState("");
+  const [aiSuggestion, setAiSuggestion] = useState<{ concept: Concept; confidence: number } | null>(null);
+  const [draftConcept, setDraftConcept] = useState<Concept | null>(null);
+  const [savedGoal, setSavedGoal] = useState<string>(() => loadSaved("goal", ""));
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ala-demo-bank", JSON.stringify(bank));
+      window.localStorage.setItem("ala-demo-goal", JSON.stringify(savedGoal));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [bank, savedGoal]);
   const c = copy[lang];
 
   function conceptLabel(concept: Concept) {
@@ -725,8 +855,8 @@ function App() {
   );
   const allMastered = conceptStatuses.every(({ status }) => status === "Mastered");
   const planSteps = useMemo<{ key: PracticeKey; label: string }[]>(() => {
-    if (allMastered) return [{ key: "Challenge", label: c.challengePractice }];
     const mode = learningGoal === "midterm" ? c.examStyle : c.stepByStep;
+    if (allMastered) return [{ key: "Challenge", label: `${c.challengePractice} · ${mode}` }];
     const priority: Record<Classification, number> = {
       Misconception: 0,
       Gap: 1,
@@ -788,8 +918,19 @@ function App() {
     setItems(initialItems);
     setConceptMapping(questions.map((question) => question.concept));
     setNavNote(false);
+    setSecondsLeft(180);
     setAlertText(null);
     setEditingItem(null);
+    setStudentPage("assistant");
+    setTeacherTab("overview");
+    setOnlySupport(false);
+    setDraftText("");
+    setAiSuggestion(null);
+    setDraftConcept(null);
+    setSavedGoal("");
+    setBank([
+      { id: 1, text: "A test gives p = 0.12 with α = 0.05. What do you conclude?", concept: "p-values interpretation", status: "approved" },
+    ]);
   }
 
   function answerCurrent(value: number) {
@@ -885,8 +1026,15 @@ function App() {
           {[5, 6, 7].map((week) => (
             <button
               key={week}
-              className={week === 6 ? "nav-item current-week" : "nav-item"}
-              onClick={() => setNavNote(true)}
+              className={
+                (week === 6 && studentPage === "assistant") || (week === 7 && studentPage === "week7") || (week === 5 && studentPage === "week5")
+                  ? "nav-item current-week"
+                  : "nav-item"
+              }
+              onClick={() => {
+                setNavNote(false);
+                setStudentPage(week === 5 ? "week5" : week === 7 ? "week7" : "assistant");
+              }}
             >
               <span>
                 {c.week} {week}
@@ -894,13 +1042,37 @@ function App() {
               {week === 6 && <Icon name="chevron" size={16} />}
             </button>
           ))}
-          <button className="nav-item" onClick={() => setNavNote(true)}>
+          <button
+            className={studentPage === "progress" ? "nav-item active" : "nav-item"}
+            onClick={() => {
+              setNavNote(false);
+              setStudentPage("progress");
+            }}
+          >
             <span className="nav-with-icon">
               <Icon name="chart" size={17} />
+              My progress
+            </span>
+          </button>
+          <button
+            className={studentPage === "grades" ? "nav-item active" : "nav-item"}
+            onClick={() => {
+              setNavNote(false);
+              setStudentPage("grades");
+            }}
+          >
+            <span className="nav-with-icon">
+              <Icon name="book" size={17} />
               {c.grades}
             </span>
           </button>
-          <button className="nav-item active" onClick={() => setNavNote(false)}>
+          <button
+            className={studentPage === "assistant" ? "nav-item active" : "nav-item"}
+            onClick={() => {
+              setNavNote(false);
+              setStudentPage("assistant");
+            }}
+          >
             <span className="nav-with-icon">
               <Icon name="spark" size={17} />
               {c.assistant}
@@ -1108,7 +1280,7 @@ function App() {
           </div>
           <div className="recommend-content">
             <div className="plan-header">
-              <div className="overline">{c.suggestedPlan}</div>
+              <div className="section-label">{c.suggestedPlan}</div>
               <label className="exam-toggle">
                 <input
                   type="checkbox"
@@ -1151,6 +1323,7 @@ function App() {
                   setFeedback(null);
                   setAttempts(0);
                   setHintsOpen(0);
+                  setSecondsLeft(180);
                   setScreen("practice");
                 }}
               >
@@ -1217,7 +1390,24 @@ function App() {
         <h1>{fill(c.taskTitle, { topic: taskTopic })}</h1>
         <div className="practice-grid">
           <section className="panel task-card">
-            <div className="task-tag">STATISTICS 101 · WEEK 6</div>
+            <div className="task-meta">
+              <div className="task-tag">STATISTICS 101 · WEEK 6</div>
+              <span className={`mode-badge ${examMode ? "exam" : ""}`}>
+                {examMode ? c.examBadge : c.stepBadge}
+                {examMode && (
+                  <strong>
+                    {" "}
+                    · {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
+                  </strong>
+                )}
+              </span>
+            </div>
+            {examMode && secondsLeft === 0 && feedback !== "correct" && (
+              <div className="feedback incorrect">
+                <Icon name="info" size={18} />
+                <span>{c.timeUp}</span>
+              </div>
+            )}
             <h2>{taskText}</h2>
             <label className="field-label" htmlFor="answer">
               {c.answer}
@@ -1238,7 +1428,7 @@ function App() {
                 <span>{feedback === "correct" ? correctText : incorrectText}</span>
               </div>
             )}
-            {attempts >= 2 && feedback === "incorrect" && (
+            {attempts >= 2 && feedback === "incorrect" && !examMode && (
               <button className="hint-prompt" onClick={() => setHintsOpen(Math.max(2, hintsOpen))}>
                 {c.tryHint} <Icon name="chevron" size={15} />
               </button>
@@ -1267,7 +1457,8 @@ function App() {
             <h2>{c.hintPanel}</h2>
             <p>{c.tryFirst}</p>
             {[1, 2, 3].map((level) => {
-              const unlocked = level === 1 || hintsOpen >= level - 1;
+              const examBlocked = examMode && level > 1;
+              const unlocked = !examBlocked && (level === 1 || hintsOpen >= level - 1);
               const open = hintsOpen >= level;
               const title = level === 1 ? c.hint1 : level === 2 ? c.hint2 : c.hint3;
               const text = hintTexts[level - 1];
@@ -1283,7 +1474,7 @@ function App() {
                     {unlocked && <span>{open ? "−" : "+"}</span>}
                   </button>
                   {open && <p>{text}</p>}
-                  {!unlocked && <small>{c.locked}</small>}
+                  {!unlocked && <small>{examBlocked ? c.examLocked : c.locked}</small>}
                 </div>
               );
             })}
@@ -1359,7 +1550,10 @@ function App() {
           <button
             className="btn primary finish"
             disabled={confidence === null}
-            onClick={() => setView("teacher")}
+            onClick={() => {
+              setSavedGoal(goal);
+              setView("teacher");
+            }}
           >
             {c.save}
           </button>
@@ -1368,9 +1562,415 @@ function App() {
     );
   }
 
+  const statusClass = (status: Classification) => status.toLowerCase();
+  const statusShort = (status: Classification) =>
+    status === "Mastered" ? "Mastered" : status === "Fragile" ? "Fragile" : status === "Gap" ? "Gap" : "Misconc.";
+  const quizDone = screen !== "diagnose";
+
+  function Progress() {
+    const rows = [...historyWeeks];
+    return (
+      <div className="content-wide">
+        <div className="eyebrow">STATISTICS 101 / MY PROGRESS</div>
+        <h1>My progress</h1>
+        <p className="lead">How each concept changed across weekly check-ins. Check-ins are not graded.</p>
+        <section className="panel">
+          <div className="table-wrap">
+            <table className="progress-table">
+              <thead>
+                <tr>
+                  <th>Concept</th>
+                  {rows.map((row) => (
+                    <th key={row.week}>
+                      Week {row.week}
+                      <small>{row.date} · {row.score}</small>
+                    </th>
+                  ))}
+                  <th>
+                    Week 6
+                    <small>{quizDone ? `this week · ${questions.length - wrongCount} of 6` : "not taken yet"}</small>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {concepts.map((concept) => {
+                  const now = conceptStatuses.find((item) => item.concept === concept)?.status;
+                  return (
+                    <tr key={concept}>
+                      <td>
+                        <strong>{conceptLabel(concept)}</strong>
+                      </td>
+                      {rows.map((row) => (
+                        <td key={row.week}>
+                          <span className={`concept-chip ${statusClass(row.statuses[concept])}`}>
+                            {row.statuses[concept]}
+                          </span>
+                        </td>
+                      ))}
+                      <td>
+                        {quizDone && now ? (
+                          <span className={`concept-chip ${statusClass(now)}`}>{now}</span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <div className="progress-grid">
+          <section className="panel">
+            <div className="section-label">YOUR GOAL</div>
+            <p>{savedGoal || "No goal saved yet. You can set one at the end of a check-in."}</p>
+          </section>
+          <section className="panel">
+            <div className="section-label">WHAT CHANGED</div>
+            <p>
+              Probability basics moved from Gap to Mastered after Week 5 practice. p-values interpretation is still the
+              main focus.
+            </p>
+          </section>
+        </div>
+        {!quizDone && (
+          <button className="btn primary" onClick={() => setStudentPage("assistant")}>
+            Take the Week 6 check-in
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  function Week5() {
+    const week = historyWeeks[1];
+    return (
+      <div className="content-narrow">
+        <div className="eyebrow">STATISTICS 101 / WEEK 5</div>
+        <h1>Week 5 check-in</h1>
+        <div className="score-line">
+          <strong>{week.score} correct</strong>
+          <span>· completed {week.date} · not graded</span>
+        </div>
+        <section className="panel result-panel">
+          <div className="result-heading">
+            <div className="section-label">CONCEPTS</div>
+          </div>
+          {concepts.map((concept) => (
+            <div className="concept-row" key={concept}>
+              <strong>{conceptLabel(concept)}</strong>
+              <span className={`concept-chip ${statusClass(week.statuses[concept])}`}>{week.statuses[concept]}</span>
+            </div>
+          ))}
+        </section>
+        <section className="panel week-plan-panel">
+          <div className="section-label">PLAN YOU COMPLETED</div>
+          <ul className="done-list">
+            <li><Icon name="check" size={16} /> p-values interpretation · step-by-step practice · 3 hints used</li>
+            <li><Icon name="check" size={16} /> Hypothesis testing · quick refresher</li>
+          </ul>
+          <p className="muted">Goal you set: "Ask about p-values in the seminar."</p>
+        </section>
+        <div className="button-row">
+          <button className="btn secondary" onClick={() => setStudentPage("progress")}>See all weeks in My progress</button>
+          <button className="btn primary" onClick={() => setStudentPage("assistant")}>Go to Week 6 check-in</button>
+        </div>
+      </div>
+    );
+  }
+
+  function Grades() {
+    const graded = [
+      { item: "Assignment 1 · Descriptive statistics", weight: "10%", result: "17 / 20", by: "Teacher", date: "19 Oct" },
+      { item: "Assignment 2 · Probability", weight: "10%", result: "15 / 20", by: "Teacher", date: "2 Nov" },
+      { item: "Midterm exam", weight: "30%", result: "Scheduled · 30 Nov", by: "Teacher", date: "—" },
+      { item: "Group project", weight: "20%", result: "In progress", by: "Teacher", date: "—" },
+      { item: "Final exam", weight: "30%", result: "Scheduled", by: "Teacher", date: "—" },
+    ];
+    return (
+      <div className="content-wide">
+        <div className="eyebrow">STATISTICS 101 / GRADES</div>
+        <h1>Grades</h1>
+        <p className="lead">Summative assessment. All marks are given by your teacher.</p>
+        <section className="panel">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Assessment</th>
+                  <th>Weight</th>
+                  <th>Result</th>
+                  <th>Marked by</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {graded.map((row) => (
+                  <tr key={row.item}>
+                    <td><strong>{row.item}</strong></td>
+                    <td>{row.weight}</td>
+                    <td>{row.result}</td>
+                    <td>{row.by}</td>
+                    <td>{row.date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="panel info-panel">
+          <Icon name="info" size={18} />
+          <div>
+            <strong>Weekly check-ins are not here.</strong>
+            <p>
+              Assistant check-ins are formative: they guide practice and are never graded. The assistant does not
+              read or change this page, and its data is not used for marks.
+            </p>
+          </div>
+        </section>
+        <section className="panel callout-panel">
+          <div className="section-label">BEFORE THE MIDTERM</div>
+          <p>
+            Your check-ins show p-values interpretation as the main focus. Exam-style practice is available in the
+            Assistant.
+          </p>
+          <button
+            className="btn secondary"
+            onClick={() => {
+              setLearningGoal("midterm");
+              setStudentPage("assistant");
+            }}
+          >
+            Practise in exam style
+          </button>
+        </section>
+      </div>
+    );
+  }
+
+  function Week7() {
+    return (
+      <div className="content-narrow">
+        <div className="eyebrow">STATISTICS 101 / WEEK 7</div>
+        <h1>Week 7 check-in</h1>
+        <section className="panel locked-panel">
+          <Icon name="lock" size={22} />
+          <div>
+            <strong>Opens on Monday, 23 November</strong>
+            <p>
+              {bank.length} question{bank.length === 1 ? "" : "s"} prepared by your teacher so far. Topics are mapped
+              by the assistant and confirmed by the teacher.
+            </p>
+          </div>
+        </section>
+        <ul className="week7-list">
+          {bank.map((question) => (
+            <li key={question.id}>
+              <span className={`concept-chip fragile`}>{conceptLabel(question.concept)}</span>
+              <span className="muted">Question hidden until the check-in opens</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  function ClassView() {
+    const demoRow = {
+      name: "Aruzhan S. (demo)",
+      statuses: Object.fromEntries(conceptStatuses.map(({ concept, status }) => [concept, status])) as Record<
+        Concept,
+        Classification
+      >,
+      score: Math.round(((questions.length - wrongCount) / questions.length) * 100),
+    };
+    const roster = quizDone ? [demoRow, ...simulatedClass] : simulatedClass;
+    const visible = onlySupport
+      ? roster.filter((row) => Object.values(row.statuses).some((s) => s === "Gap" || s === "Misconception"))
+      : roster;
+    return (
+      <section className="table-section">
+        <div className="section-heading">
+          <div>
+            <h2>Class overview · Group 3</h2>
+            <p>Status per concept from the Week 6 check-in (simulated class data).</p>
+          </div>
+          <label className="exam-toggle">
+            <input type="checkbox" checked={onlySupport} onChange={(e) => setOnlySupport(e.target.checked)} />
+            Only students needing support
+          </label>
+        </div>
+        <div className="concept-summary">
+          {concepts.map((concept) => {
+            const mis = roster.filter((row) => row.statuses[concept] === "Misconception").length;
+            const gap = roster.filter((row) => row.statuses[concept] === "Gap").length;
+            return (
+              <div key={concept} className="summary-card">
+                <span>{conceptLabel(concept)}</span>
+                <strong>{mis + gap}</strong>
+                <small>
+                  {mis} misconception · {gap} gap
+                </small>
+              </div>
+            );
+          })}
+        </div>
+        <div className="table-wrap">
+          <table className="heatmap">
+            <thead>
+              <tr>
+                <th>Student</th>
+                {concepts.map((concept) => (
+                  <th key={concept}>{conceptLabel(concept)}</th>
+                ))}
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((row) => (
+                <tr key={row.name} className={row.name.includes("demo") ? "demo-row" : ""}>
+                  <td>
+                    <strong>{row.name}</strong>
+                  </td>
+                  {concepts.map((concept) => (
+                    <td key={concept}>
+                      <span className={`heat ${statusClass(row.statuses[concept])}`}>
+                        {statusShort(row.statuses[concept])}
+                      </span>
+                    </td>
+                  ))}
+                  <td>{row.score}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
+  function QuestionBank() {
+    return (
+      <section className="table-section">
+        <div className="section-heading">
+          <div>
+            <h2>Question bank · Week 7</h2>
+            <p>Write a question; the assistant suggests the course concept; you confirm or change it.</p>
+          </div>
+          <span>{bank.length} questions</span>
+        </div>
+        <div className="bank-form panel">
+          <label htmlFor="new-question">New question</label>
+          <textarea
+            id="new-question"
+            className="text-input"
+            rows={2}
+            placeholder="e.g. Given that a student passed the midterm, what is the probability…"
+            value={draftText}
+            onChange={(event) => {
+              setDraftText(event.target.value);
+              setAiSuggestion(null);
+              setDraftConcept(null);
+            }}
+          />
+          <div className="button-row">
+            <button
+              className="btn secondary"
+              disabled={draftText.trim().length < 8}
+              onClick={() => {
+                const suggestion = suggestConcept(draftText);
+                setAiSuggestion(suggestion);
+                setDraftConcept(suggestion.concept);
+              }}
+            >
+              Suggest concept (AI)
+            </button>
+          </div>
+          {aiSuggestion && draftConcept && (
+            <div className="ai-suggest">
+              <span>
+                Assistant suggests: <strong>{conceptLabel(aiSuggestion.concept)}</strong> · confidence{" "}
+                {Math.round(aiSuggestion.confidence * 100)}%
+              </span>
+              <select value={draftConcept} onChange={(event) => setDraftConcept(event.target.value as Concept)}>
+                {concepts.map((concept) => (
+                  <option key={concept} value={concept}>
+                    {conceptLabel(concept)}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setBank((rows) => [
+                    ...rows,
+                    { id: Date.now(), text: draftText.trim(), concept: draftConcept, status: "approved" },
+                  ]);
+                  setDraftText("");
+                  setAiSuggestion(null);
+                  setDraftConcept(null);
+                }}
+              >
+                Confirm and add
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{c.question}</th>
+                <th>Concept</th>
+                <th>{c.actions}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bank.map((question) => (
+                <tr key={question.id}>
+                  <td>
+                    <strong>{question.text}</strong>
+                  </td>
+                  <td>{conceptLabel(question.concept)}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button
+                        className="reject"
+                        onClick={() => setBank((rows) => rows.filter((row) => row.id !== question.id))}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
   function TeacherDashboard() {
-    const supportCount = 13 + (needsSupport ? 1 : 0);
-    const suggestion = alertText ?? c.stuck;
+    const roster = quizDone
+      ? [
+          ...simulatedClass.map((row) => row.statuses),
+          Object.fromEntries(conceptStatuses.map(({ concept, status }) => [concept, status])) as Record<Concept, Classification>,
+        ]
+      : simulatedClass.map((row) => row.statuses);
+    const supportCount = roster.filter((st) => Object.values(st).some((x) => x === "Gap" || x === "Misconception")).length;
+    const pMis = roster.filter((st) => st["p-values interpretation"] === "Misconception").length;
+    const avgScore = Math.round(
+      (simulatedClass.reduce((sum, row) => sum + row.score, 0) +
+        (quizDone ? ((questions.length - wrongCount) / questions.length) * 100 : 0)) /
+        (simulatedClass.length + (quizDone ? 1 : 0)),
+    );
+    const defaultAlert =
+      lang === "EN"
+        ? `${pMis} students share a misconception: treating the p-value as the probability that H0 is true. Suggestion: address it in Thursday seminar.`
+        : c.stuck.replace(/\d+/, String(pMis));
+    const suggestion = alertText ?? defaultAlert;
     const alertMessage =
       alertStatus === "approved"
         ? `${c.alertApproved} ${suggestion}`
@@ -1385,18 +1985,34 @@ function App() {
             <div className="eyebrow">COURSE DASHBOARD / WEEK 6</div>
             <h1>{c.teacherTitle}</h1>
           </div>
-          <div className="updated">Updated from current demo session</div>
+          <div className="updated">Group 3 · {roster.length} students · updated from current demo session</div>
         </div>
+        <div className="teacher-tabs">
+          {(
+            [
+              ["overview", "Overview"],
+              ["class", "Class overview"],
+              ["bank", "Question bank"],
+            ] as const
+          ).map(([key, label]) => (
+            <button key={key} className={teacherTab === key ? "active" : ""} onClick={() => setTeacherTab(key)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {teacherTab === "class" && ClassView()}
+        {teacherTab === "bank" && QuestionBank()}
+        {teacherTab === "overview" && (<>
         <div className="summary-grid">
           <div className="summary-card">
             <span>{c.active}</span>
-            <strong>112</strong>
-            <small>+8 this week</small>
+            <strong>{roster.length}</strong>
+            <small>Group 3, Statistics 101</small>
           </div>
           <div className="summary-card">
             <span>{c.average}</span>
-            <strong>64%</strong>
-            <small>Across 112 students</small>
+            <strong>{avgScore}%</strong>
+            <small>Across {roster.length} students</small>
           </div>
           <div className="summary-card attention">
             <span>{c.needing}</span>
@@ -1409,7 +2025,7 @@ function App() {
             <Icon name="info" />
           </div>
           <div>
-            <div className="overline">LEARNING ALERT</div>
+            <div className="section-label">LEARNING ALERT</div>
             {alertStatus === "editing" ? (
               <div className="alert-edit">
                 <textarea
@@ -1570,6 +2186,7 @@ function App() {
             </table>
           </div>
         </section>
+        </>)}
         <footer className="teacher-footer">
           <Icon name="info" size={17} />
           {c.footer}
@@ -1588,10 +2205,14 @@ function App() {
           {Sidebar()}
           <main className="student-main">
             {SimulatedLabel()}
-            {screen === "diagnose" && Diagnose()}
-            {screen === "recommend" && Results()}
-            {screen === "practice" && Practice()}
-            {screen === "reflect" && Reflect()}
+            {studentPage === "progress" && Progress()}
+            {studentPage === "week7" && Week7()}
+            {studentPage === "week5" && Week5()}
+            {studentPage === "grades" && Grades()}
+            {studentPage === "assistant" && screen === "diagnose" && Diagnose()}
+            {studentPage === "assistant" && screen === "recommend" && Results()}
+            {studentPage === "assistant" && screen === "practice" && Practice()}
+            {studentPage === "assistant" && screen === "reflect" && Reflect()}
           </main>
         </div>
       )}
